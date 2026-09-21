@@ -3,25 +3,63 @@
 #include "esp_rom_sys.h"
 #include <stdbool.h>
 
-#define GPIO_IN_REG (*(volatile uint32_t*)0x3FF4403C)
-#define GPIO_OUT_W1TC_REG (*(volatile uint32_t*)0x3FF4400C) 
+#define GPIO_IN_REG (*(volatile uint32_t*)0x3FF4403C) // IN register that we can read state from input pins
+#define GPIO_OUT_W1TC_REG (*(volatile uint32_t*)0x3FF4400C) //  set 1 to a bit clears its function
+#define IO_MUX_GPIO4_REG (*(volatile uint32_t*)0x3FF49048) // IO_MUX pin 4 register
+#define GPIO_OUT_W1TS_REG (*(volatile uint32_t*)0x3FF44008) // turns output pin as HIGH
+#define GPIO_ENABLE_W1TS_REG (*(volatile uint32_t*)0x3FF44024) // enable pin as output
+#define GPIO_ENABLE_W1TC_REG (*(volatile uint32_t*)0x3FF44028) // disable pin as output
+
 #define BUTTON_PIN 4
+#define LED_PIN 2
+
+#define FUN_WPU (1 << 8)
+#define FUN_IE  (1 << 9)
 
 bool button_is_pressed() {
     uint32_t value = GPIO_IN_REG & (1 << BUTTON_PIN);
     return value == 0;
 }
 
+typedef enum {
+    GPIO_LOW = 0,
+    GPIO_HIGH = 1,
+} gpio_level_t;
+
+void gpio_write(unsigned int pin, gpio_level_t level) {
+    if (level == GPIO_LOW) {
+        GPIO_OUT_W1TC_REG = (1 << pin);
+    } else {
+        GPIO_OUT_W1TS_REG = (1 << pin);
+    }
+}
+
+bool led_state = false;
+
 void app_main(void)
 {
-    GPIO_OUT_W1TC_REG = (1 << BUTTON_PIN);
+    GPIO_ENABLE_W1TC_REG = (1 << BUTTON_PIN); // disable output driver
+
+    GPIO_ENABLE_W1TS_REG = (1 << LED_PIN);
+
+    gpio_write(LED_PIN, GPIO_LOW); // set led pin as LOW
+
+    IO_MUX_GPIO4_REG = (IO_MUX_GPIO4_REG & ~(0x7 << 12)) | (2 << 12); // clear bits 12-14 and sets 2(010) as GPIO function. "preserve all other bits and substitute those which I want"
+
+    IO_MUX_GPIO4_REG |= FUN_WPU | FUN_IE; // enable FUN_IE and FUN_WPU
 
     while (1) {
         if (button_is_pressed()) {
             esp_rom_delay_us(20000);
 
             if (button_is_pressed()) {
-                // do some logic
+                led_state = !led_state;
+
+                gpio_write(LED_PIN, led_state ? GPIO_HIGH : GPIO_LOW);
+
+                // Wait for button release
+                while (button_is_pressed()) {
+                }
             }
         }
     }
